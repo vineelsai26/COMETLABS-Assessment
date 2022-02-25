@@ -118,7 +118,7 @@ app.get('/displayQuestions', authenticateToken, async (req, res) => {
     }
 })
 
-app.get('/displayUploadedQuestions', async (req, res) => {
+app.get('/displayUploadedQuestions', authenticateToken, async (req, res) => {
     if (req.user.role == 'admin') {
         let questionsList = []
         await Question.find().then(async (questions) => {
