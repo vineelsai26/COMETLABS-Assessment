@@ -1,3 +1,4 @@
+// Imports
 const bodyParser = require('body-parser')
 const express = require('express')
 const axios = require('axios')
@@ -10,9 +11,13 @@ const Submission = require('./models/Submission')
 const jwt = require('jsonwebtoken')
 const bcrypt = require('bcrypt')
 
+// load .env
 require('dotenv').config()
 
+// Express
 const app = express()
+
+// Constants
 const MONGODB_URL = process.env.MONGODB_URL
 const SPHERE_PROBLEMS_URL = process.env.SPHERE_PROBLEMS_URL
 const SPHERE_PROBLEMS_TOKEN = process.env.SPHERE_PROBLEMS_TOKEN
@@ -21,25 +26,32 @@ const PORT = process.env.PORT || 3000
 
 let refreshTokens = []
 
+// connect to mongoDB
 mongoose.connect(MONGODB_URL)
 
+// express extensions
 app.use(express.json())
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())
 
+// Axios headers
 axios.defaults.headers.post['Content-Type'] = 'application/json'
 
 
 app.get('/', authenticateToken, (req, res) => {
+    // Greeting
     res.send(`Hello ${req.user.name} you are ${req.user.role}`)
 })
 
+// signup
 app.post('/signup', async (req, res) => {
+    // User details from POST request
     const name = req.body.name
     const email = req.body.email
     const password = req.body.password
     const role = req.body.role
 
+    // Create user object
     const user = new User({
         name,
         email,
@@ -47,45 +59,62 @@ app.post('/signup', async (req, res) => {
         role
     })
 
+    // Save user to database
     await user.save().then(() => {
+        // Generate access token and refresh token
         const accessToken = generateAccessToken(user)
         const refreshToken = generateRefreshToken(user)
 
+        // Send response
         res.send({ email: user.email, accessToken: accessToken, refreshToken: refreshToken })
     }).catch(err => {
+        // Send error response
         res.status(400).send(err)
     })
 })
 
+// login
 app.post('/login', async (req, res) => {
+    // User details from POST request
     const email = req.body.email
     const password = req.body.password
 
+    // Find user in database
     const user = await User.findOne({ email: email })
 
+    // Check if user exists
     if (!user) {
         return res.status(401).send('User not found')
     } else {
+        // Check if password is correct for user
         const isPasswordValid = await bcrypt.compare(password, user.password)
 
+        // Check if password is valid
         if (!isPasswordValid) {
             return res.status(401).send('Password is invalid')
         } else {
+            // Generate access token and refresh token
             const accessToken = generateAccessToken(user)
             const refreshToken = generateRefreshToken(user)
 
+            // Send response
             res.send({ email: user.email, accessToken: accessToken, refreshToken: refreshToken })
         }
     }
 })
 
+// logout
 app.post('/logout', (req, res) => {
+    // Get refresh token from request and remove it from array
     refreshTokens = refreshTokens.filter(token => token !== req.body.refreshToken)
     res.send('Logged out')
 })
 
+// regenerate auth token with refresh token
 app.post('/refresh', (req, res) => {
     const refreshToken = req.body.refreshToken
+
+    // Check if refresh token is valid
     if (refreshToken == null) {
         return res.status(401).send('Token is invalid')
     } else {
@@ -96,6 +125,7 @@ app.post('/refresh', (req, res) => {
                 if (err) {
                     return res.status(403).send('Token is invalid')
                 } else {
+                    // Generate new access token
                     const accessToken = generateAccessToken(user)
 
                     return res.status(200).send({ accessToken: accessToken, refreshToken: refreshToken })
@@ -106,8 +136,11 @@ app.post('/refresh', (req, res) => {
     }
 })
 
+// display all questions
 app.get('/displayQuestions', authenticateToken, async (req, res) => {
+    // is user admin
     if (req.user.role == 'admin') {
+        // get directly from sphere api
         await axios.get(SPHERE_PROBLEMS_URL + '?access_token=' + SPHERE_PROBLEMS_TOKEN).then(response => {
             res.send(response.data)
         }).catch(err => {
@@ -118,8 +151,10 @@ app.get('/displayQuestions', authenticateToken, async (req, res) => {
     }
 })
 
+// display questions uploaded by any admin
 app.get('/displayUploadedQuestions', authenticateToken, async (req, res) => {
     if (req.user.role == 'admin') {
+        // get question ids from mongoDB and send them to sphere api
         let questionsList = []
         await Question.find().then(async (questions) => {
             for (let i = 0; i < questions.length; i++) {
@@ -140,8 +175,10 @@ app.get('/displayUploadedQuestions', authenticateToken, async (req, res) => {
     }
 })
 
+// add questions
 app.post('/addQuestion', authenticateToken, async (req, res) => {
     if (req.user.role == 'admin') {
+        // validate if question is valid
         if (req.body.name == null || req.body.description == null) {
             return res.status(400).send('Missing required fields')
         } else {
@@ -163,9 +200,12 @@ app.post('/addQuestion', authenticateToken, async (req, res) => {
     }
 })
 
+// update questions
 app.post('/updateQuestion', authenticateToken, async (req, res) => {
     if (req.user.role == 'admin') {
+        // get previous question data from sphere api
         await axios.get(SPHERE_PROBLEMS_URL + '/' + req.body.id + '?access_token=' + SPHERE_PROBLEMS_TOKEN).then(response => {
+            // if required fields are empty overwrite with previous data
             if (req.body.name == null) {
                 req.body.name = response.data.name
             }
@@ -186,6 +226,7 @@ app.post('/updateQuestion', authenticateToken, async (req, res) => {
     }
 })
 
+// delete questions
 app.post('/deleteQuestion', authenticateToken, async (req, res) => {
     if (req.user.role == 'admin') {
         await axios.delete(SPHERE_PROBLEMS_URL + '/' + req.body.id + '?access_token=' + SPHERE_PROBLEMS_TOKEN).then(async (response) => {
@@ -242,12 +283,14 @@ app.post('/updateTestCase', authenticateToken, async (req, res) => {
     }
 })
 
+// submit code
 app.post('/submission', authenticateToken, async (req, res) => {
     await axios.post(SPHERE_SUBMISSIONS_URL + '?access_token=' + SPHERE_PROBLEMS_TOKEN, {
         "problemId": req.body.problemId,
         "source": req.body.source,
         "compilerId": req.body.compilerId || 1
     }).then(async (response) => {
+        // sent code to sphere then get the result
         await axios.get(SPHERE_SUBMISSIONS_URL + '/' + response.data.id + '?access_token=' + SPHERE_PROBLEMS_TOKEN).then(async (response) => {
             await saveSubmissionResult(response, req, res)
         }).catch(err => {
@@ -258,6 +301,7 @@ app.post('/submission', authenticateToken, async (req, res) => {
     })
 })
 
+// list submissions
 app.get('/listAllSubmissions', authenticateToken, async (req, res) => {
     if (req.user.role == 'admin') {
         await Submission.find().then(async (submissions) => {
@@ -302,6 +346,7 @@ app.get('/listSelfSubmissions', authenticateToken, async (req, res) => {
     })
 })
 
+// Submission takes time to run so check every second for the result
 async function saveSubmissionResult(response, req, res) {
     if (response.data.result.status.name == 'compiling...') {
         sleep(1000).then(async () => {
@@ -325,6 +370,7 @@ async function saveSubmissionResult(response, req, res) {
     }
 }
 
+// generate access token
 function generateAccessToken(user) {
     return jwt.sign(
         {
@@ -337,6 +383,7 @@ function generateAccessToken(user) {
     )
 }
 
+// generate refresh token
 function generateRefreshToken(user) {
     const refreshToken = jwt.sign(
         {
@@ -350,6 +397,7 @@ function generateRefreshToken(user) {
     return refreshToken
 }
 
+// middleware to authenticate token
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization']
     const token = authHeader && authHeader.split(' ')[1]
@@ -367,4 +415,5 @@ function authenticateToken(req, res, next) {
     }
 }
 
+// listen on port
 app.listen(PORT)
